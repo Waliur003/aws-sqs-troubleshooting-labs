@@ -1,564 +1,907 @@
-# Amazon DynamoDB Troubleshooting Labs
+# Amazon SQS Troubleshooting Labs
 
-**Production-Style AWS Troubleshooting | Cloud Engineering | Cloud Security Engineering**
+**Production-Style AWS Cloud Engineering & Cloud Security Engineering Troubleshooting**
 
 ## Overview
 
-This repository contains 10 hands-on Amazon DynamoDB troubleshooting labs based on real-world cloud engineering and cloud security scenarios.
+This repository contains 10 hands-on Amazon Simple Queue Service (Amazon SQS) troubleshooting labs.
 
-The purpose of this project is to develop practical skills in investigating DynamoDB errors, identifying root causes, restoring database operations, monitoring performance, and securing AWS database resources.
+The goal is to learn how to investigate, reproduce, diagnose, and remediate real-world messaging problems using AWS CLI, Linux Bash, AWS Lambda, IAM, and Amazon CloudWatch.
 
-Each lab simulates a production-style incident involving DynamoDB tables, access permissions, data validation, partition keys, throughput, secondary indexes, DynamoDB Streams, or disaster recovery.
+Amazon SQS is a fully managed message queuing service that helps applications communicate asynchronously.
 
-The troubleshooting process uses AWS CLI, Linux Bash, Python when appropriate, IAM, CloudWatch, and other relevant AWS services.
+It is commonly used in production systems for:
 
-Rather than only learning DynamoDB concepts, this repository focuses on identifying problems, reproducing failures, investigating configurations, applying remediation, and verifying recovery.
+- Microservices communication.
+- Background job processing.
+- Order processing systems.
+- Event-driven architectures.
+- Serverless applications.
+- Distributed systems.
+- Application decoupling.
+- Workload buffering.
+- Fault-tolerant processing.
+- Cloud-native infrastructure.
 
-## Learning Objectives
+Although Amazon SQS is managed by AWS, application failures can still occur because of incorrect configurations, insufficient permissions, improperly managed visibility timeouts, missing consumers, or failed message processing.
 
-By completing these labs, the goal is to understand:
+These labs simulate those situations using dedicated AWS resources.
 
-- DynamoDB table operations and resource identification.
-- IAM permissions for DynamoDB.
-- DynamoDB partition keys and sort keys.
-- DynamoDB item structure and attribute types.
-- DynamoDB PutItem, GetItem, Query, and Scan operations.
-- Common DynamoDB exceptions.
-- Provisioned and on-demand capacity modes.
-- Read and write capacity concepts.
-- Conditional writes and optimistic concurrency.
-- Global Secondary Indexes (GSIs).
-- DynamoDB Streams and Lambda event source mappings.
-- Point-in-time recovery (PITR).
-- DynamoDB backup and restore.
-- Hot partitions and uneven workloads.
-- CloudWatch metrics and performance analysis.
-- Secure database configuration.
-- Incident investigation and recovery.
+Each lab follows a production incident investigation process.
+
+The repository is designed for practical Cloud Engineer, Cloud Operations Engineer, DevOps Engineer, and Cloud Security Engineer preparation.
 
 ---
 
-## AWS Services and Tools
+## 1. Repository Objectives
 
-| Service / Tool | Purpose |
-|---|---|
-| Amazon DynamoDB | Primary NoSQL database |
-| AWS IAM | Access permissions and least privilege |
-| Amazon CloudWatch | Metrics, logging, and monitoring |
-| AWS Lambda | DynamoDB Streams processing |
-| DynamoDB Streams | Change data capture |
-| AWS Backup / DynamoDB PITR | Recovery concepts |
-| AWS CLI v2 | Resource management and troubleshooting |
-| Linux Bash | Command-line automation |
-| Python / Boto3 | Application-level investigation when needed |
-| jq | JSON filtering and inspection |
+By completing these labs, the engineer develops practical experience in:
 
-**AWS Region:** `us-east-1`
-
-**Primary environment:** WSL2 Ubuntu Linux
+- Creating and configuring SQS queues.
+- Investigating AWS CLI errors.
+- Troubleshooting IAM authorization failures.
+- Understanding message lifecycle behavior.
+- Investigating missing and delayed messages.
+- Configuring visibility timeouts.
+- Understanding at-least-once delivery.
+- Designing idempotent message consumers.
+- Configuring dead-letter queues.
+- Troubleshooting failed redrive policies.
+- Understanding FIFO queue ordering and deduplication.
+- Connecting AWS Lambda to SQS.
+- Investigating poison messages.
+- Monitoring queue backlogs.
+- Measuring message processing delays.
+- Applying least-privilege IAM permissions.
+- Performing root cause analysis.
+- Cleaning up AWS resources safely.
 
 ---
 
-## Repository Structure
+## 2. Troubleshooting Labs
+
+| Lab | Troubleshooting Scenario | Primary Focus |
+|---|---|---|
+| 01 | Queue Does Not Exist | Queue URLs, names, Regions, resource discovery |
+| 02 | SendMessage AccessDenied | IAM policies, identity, queue permissions |
+| 03 | Messages Not Being Received | Visibility, consumers, long polling |
+| 04 | Visibility Timeout Misconfiguration | In-flight messages and timeout settings |
+| 05 | Messages Processed Multiple Times | At-least-once delivery, idempotency |
+| 06 | Dead-Letter Queue Not Receiving Messages | Redrive policies and receive counts |
+| 07 | FIFO Message Deduplication | MessageGroupId, MessageDeduplicationId |
+| 08 | Lambda SQS Event Source Failure | Event source mapping, IAM, Lambda errors |
+| 09 | Poison Message Investigation | Failed processing, DLQ, safe redrive |
+| 10 | Queue Backlog and Processing Delay | Queue depth, message age, consumer capacity |
+
+The labs progress from basic queue troubleshooting to production-style distributed message-processing incidents.
+
+---
+
+## 3. AWS Architecture
+
+### Basic Message Queue Architecture
 
 ```text
-aws-dynamodb-troubleshooting-labs/
+                 Producer Application
+                          |
+                          v
+                     SendMessage
+                          |
+                          v
+                    Amazon SQS
+                          |
+                          v
+                    Message Queue
+                          |
+                          v
+                  Consumer Application
+                          |
+                          v
+                    ReceiveMessage
+                          |
+                          v
+                    Process Message
+                          |
+                          v
+                    DeleteMessage
+```
+
+### Production Architecture With Dead-Letter Queue
+
+```text
+                     Producer
+                        |
+                        v
+                    Amazon SQS
+                    Source Queue
+                        |
+                        v
+                   Message Consumer
+                        |
+                 +------+------+
+                 |             |
+                 v             v
+              Success        Failure
+                 |             |
+                 v             v
+            DeleteMessage   Retry After
+                            Visibility Timeout
+                                  |
+                                  v
+                            Receive Count
+                                  |
+                                  v
+                           maxReceiveCount
+                              Exceeded
+                                  |
+                                  v
+                           Dead-Letter Queue
+                                  |
+                                  v
+                             Investigation
+                                  |
+                                  v
+                            Fix and Redrive
+```
+
+### Serverless Architecture
+
+```text
+                 Order Application
+                        |
+                        v
+                  Amazon SQS
+                        |
+                        v
+               Lambda Event Source
+                    Mapping
+                        |
+                        v
+                    AWS Lambda
+                        |
+                        v
+                Process Message Batch
+                        |
+                  +-----+-----+
+                  |           |
+                  v           v
+               Success     Failure
+                  |           |
+                  v           v
+             Message       Retry / DLQ
+             Removed
+```
+
+AWS Lambda polls SQS using event source mappings and processes messages in batches. A failed batch can cause messages to become visible again after the visibility timeout, depending on configuration.
+
+---
+
+## 4. Understanding Amazon SQS
+
+Amazon SQS provides managed message queues for decoupled applications.
+
+### Standard Queue
+
+Standard queues support high throughput and at-least-once message delivery.
+
+Characteristics:
+
+- At-least-once delivery.
+- Best-effort ordering.
+- Possible duplicate delivery.
+- High scalability.
+- Suitable for general asynchronous processing.
+
+### FIFO Queue
+
+FIFO queues support ordered message processing within message groups and deduplication within the supported deduplication interval.
+
+Characteristics:
+
+- Message group ordering.
+- Message deduplication.
+- `MessageGroupId` support.
+- `MessageDeduplicationId` support.
+- Five-minute deduplication interval.
+- Suitable for workloads requiring ordered processing.
+
+### Standard vs. FIFO
+
+| Feature | Standard | FIFO |
+|---|---|---|
+| Delivery | At least once | Deduplicated sends within supported interval |
+| Ordering | Best effort | Within message groups |
+| Duplicate Delivery | Possible | Deduplication protections, with consumer idempotency still recommended |
+| MessageGroupId | Not required | Required |
+| MessageDeduplicationId | Not required | Required unless content-based deduplication is enabled |
+| Common Use | General background jobs | Ordered workflows |
+
+**Important:** FIFO deduplication does not eliminate the need for idempotent application processing.
+
+---
+
+## 5. Understanding the SQS Message Lifecycle
+
+```text
+Producer Sends Message
+          |
+          v
+Message Becomes Available
+          |
+          v
+Consumer Receives Message
+          |
+          v
+Message Becomes In-Flight
+          |
+          v
+Visibility Timeout Begins
+          |
+     +----+----+
+     |         |
+     v         v
+Processing   Processing
+Success      Failure
+     |         |
+     v         v
+DeleteMessage  Timeout Expires
+     |         |
+     v         v
+Message       Message Becomes
+Removed       Visible Again
+                   |
+                   v
+                  Retry
+```
+
+A successful ReceiveMessage does not delete the message.
+
+The consumer must delete the processed message using its receipt handle.
+
+### Important SQS Concepts
+
+| Concept | Meaning |
+|---|---|
+| Queue URL | API identifier for a queue |
+| Queue ARN | AWS resource identifier |
+| Message ID | Identifier for a sent message |
+| Receipt Handle | Token used to delete or change visibility of a received message |
+| Visibility Timeout | Time a received message is temporarily hidden |
+| Long Polling | Waits for messages to arrive |
+| Message Retention | How long messages remain available before expiration |
+| In-Flight Message | Received but not deleted message |
+| DLQ | Stores messages that fail processing repeatedly |
+| Redrive Policy | Controls movement to a DLQ |
+| ApproximateReceiveCount | Approximate number of receives |
+
+---
+
+## 6. Lab 01 — Queue Does Not Exist
+
+### Production Scenario
+
+An application attempts to access an SQS queue but receives an error indicating the queue does not exist.
+
+### Investigation Areas
+
+- Incorrect queue name.
+- Incorrect AWS Region.
+- Incorrect AWS account.
+- Incorrect queue URL.
+- Deleted queue.
+- IAM permissions affecting queue discovery.
+
+### AWS CLI Operations
+
+```bash
+aws sqs list-queues
+aws sqs get-queue-url
+aws sqs create-queue
+aws sqs get-queue-attributes
+```
+
+### Expected Skills
+
+- Queue discovery.
+- AWS resource identification.
+- Region verification.
+- Queue URL troubleshooting.
+- Safe queue creation.
+
+---
+
+## 7. Lab 02 — SendMessage AccessDenied
+
+### Production Scenario
+
+An application attempts to publish a message to SQS but lacks sufficient permissions.
+
+### Investigation Areas
+
+- IAM identity policies.
+- Queue resource policies.
+- Explicit denies.
+- Cross-account permissions.
+- KMS permissions when using customer-managed encryption keys.
+
+### AWS CLI Operations
+
+```bash
+aws sts get-caller-identity
+aws sqs send-message
+aws sqs get-queue-attributes
+```
+
+### Expected Skills
+
+- IAM authorization troubleshooting.
+- Queue policy investigation.
+- Least-privilege access.
+- Secure message publishing.
+
+---
+
+## 8. Lab 03 — Messages Not Being Received
+
+### Production Scenario
+
+An application successfully sends messages to a queue, but its consumer reports no messages available.
+
+### Investigation Areas
+
+- Queue URL.
+- Consumer configuration.
+- Message visibility.
+- Long polling.
+- Delivery delay.
+- Competing consumers.
+- Approximate message counts.
+
+### AWS CLI Operations
+
+```bash
+aws sqs send-message
+aws sqs receive-message
+aws sqs get-queue-attributes
+```
+
+### Expected Skills
+
+- Message lifecycle investigation.
+- Visibility analysis.
+- Long polling.
+- Consumer troubleshooting.
+
+---
+
+## 9. Lab 04 — Visibility Timeout Misconfiguration
+
+### Production Scenario
+
+A consumer receives a message but takes longer to process it than the configured visibility timeout.
+
+The message may become visible again before the first consumer finishes processing.
+
+### Investigation Areas
+
+- Queue visibility timeout.
+- Processing duration.
+- In-flight messages.
+- ChangeMessageVisibility.
+- Duplicate processing risk.
+
+### AWS CLI Operations
+
+```bash
+aws sqs get-queue-attributes
+aws sqs set-queue-attributes
+aws sqs receive-message
+aws sqs change-message-visibility
+```
+
+### Expected Skills
+
+- Visibility timeout configuration.
+- Processing reliability.
+- Message retry behavior.
+- In-flight message management.
+
+---
+
+## 10. Lab 05 — Messages Processed Multiple Times
+
+### Production Scenario
+
+An application performs the same operation more than once because a message is received multiple times.
+
+### Investigation Areas
+
+- Standard queue at-least-once delivery.
+- Missing DeleteMessage.
+- Visibility timeout expiration.
+- Consumer crashes.
+- Duplicate message handling.
+- Idempotent processing.
+
+### AWS CLI Operations
+
+```bash
+aws sqs send-message
+aws sqs receive-message
+aws sqs delete-message
+```
+
+### Expected Skills
+
+- At-least-once processing.
+- Idempotency design.
+- Duplicate message investigation.
+- Safe consumer implementation.
+
+---
+
+## 11. Lab 06 — Dead-Letter Queue Not Receiving Messages
+
+### Production Scenario
+
+A message repeatedly fails processing, but the expected dead-letter queue remains empty.
+
+### Investigation Areas
+
+- RedrivePolicy.
+- maxReceiveCount.
+- DLQ ARN.
+- Queue type compatibility.
+- Message receive attempts.
+- RedriveAllowPolicy.
+- Retention settings.
+
+### AWS CLI Operations
+
+```bash
+aws sqs create-queue
+aws sqs set-queue-attributes
+aws sqs get-queue-attributes
+aws sqs receive-message
+```
+
+### Expected Skills
+
+- Dead-letter queue configuration.
+- Redrive troubleshooting.
+- Receive-count investigation.
+- Failure isolation.
+
+---
+
+## 12. Lab 07 — FIFO Message Deduplication
+
+### Production Scenario
+
+A producer sends a FIFO message, but subsequent sends with the same deduplication identifier do not create additional deliverable messages during the deduplication interval.
+
+### Investigation Areas
+
+- FIFO queue configuration.
+- MessageGroupId.
+- MessageDeduplicationId.
+- Content-based deduplication.
+- Deduplication interval.
+- Message ordering.
+
+### AWS CLI Operations
+
+```bash
+aws sqs create-queue
+aws sqs send-message
+aws sqs receive-message
+```
+
+### Expected Skills
+
+- FIFO queue behavior.
+- Message ordering.
+- Deduplication investigation.
+- Reliable producer design.
+
+---
+
+## 13. Lab 08 — Lambda SQS Event Source Failure
+
+### Production Scenario
+
+Messages accumulate in SQS, but Lambda does not process them successfully.
+
+### Investigation Areas
+
+- Lambda event source mapping.
+- IAM execution role.
+- Queue visibility timeout.
+- Lambda execution timeout.
+- Lambda errors.
+- Batch failures.
+- Partial batch responses.
+- CloudWatch Logs.
+
+### AWS CLI Operations
+
+```bash
+aws lambda list-event-source-mappings
+aws lambda get-event-source-mapping
+aws lambda update-event-source-mapping
+aws logs tail
+```
+
+### Expected Skills
+
+- SQS–Lambda integration.
+- Event source mapping troubleshooting.
+- IAM permissions.
+- Failed batch handling.
+- Serverless incident investigation.
+
+---
+
+## 14. Lab 09 — Poison Message Investigation
+
+### Production Scenario
+
+One malformed or invalid message repeatedly causes consumer processing failures.
+
+### Investigation Areas
+
+- Invalid message payloads.
+- Application exceptions.
+- Retry behavior.
+- ApproximateReceiveCount.
+- Poison message isolation.
+- DLQ processing.
+- Safe message redrive.
+
+### Expected Skills
+
+- Poison message identification.
+- Failure isolation.
+- Consumer validation.
+- Retry limits.
+- Dead-letter queue recovery.
+
+---
+
+## 15. Lab 10 — Queue Backlog and Processing Delay
+
+### Production Scenario
+
+Messages arrive faster than consumers can process them.
+
+The queue backlog grows, and customers experience processing delays.
+
+### Investigation Areas
+
+- ApproximateNumberOfMessages.
+- ApproximateNumberOfMessagesNotVisible.
+- ApproximateAgeOfOldestMessage.
+- Message arrival rate.
+- Processing throughput.
+- Consumer concurrency.
+- Lambda scaling.
+- CloudWatch alarms.
+
+### Expected Skills
+
+- Backlog investigation.
+- Queue-depth monitoring.
+- Consumer capacity analysis.
+- Processing-delay troubleshooting.
+- Scaling recommendations.
+
+---
+
+## 16. Production Troubleshooting Workflow
+
+Every lab follows a consistent incident investigation methodology.
+
+### Phase 1 — Prepare
+
+- Verify AWS account and Region.
+- Create dedicated lab resources.
+- Configure environment variables.
+- Identify expected behavior.
+
+### Phase 2 — Establish Baseline
+
+- Verify healthy queue configuration.
+- Send and receive test messages where appropriate.
+- Confirm expected consumer behavior.
+
+### Phase 3 — Inject Fault
+
+- Introduce one controlled misconfiguration or application failure.
+- Reproduce the expected symptom.
+- Capture relevant AWS CLI output.
+
+### Phase 4 — Investigate
+
+- Inspect queue attributes.
+- Inspect IAM policies.
+- Inspect message states.
+- Review CloudWatch metrics.
+- Identify the underlying cause.
+
+### Phase 5 — Remediate
+
+- Correct the configuration.
+- Apply least privilege.
+- Preserve message integrity.
+- Avoid unnecessary resource replacement.
+
+### Phase 6 — Verify
+
+- Repeat the original operation.
+- Confirm the expected message behavior.
+- Verify consumer processing.
+- Check logs and metrics.
+
+### Phase 7 — Cleanup
+
+- Delete temporary queues.
+- Remove temporary IAM and Lambda resources.
+- Verify resource deletion.
+- Preserve useful source files and documentation.
+
+---
+
+## 17. Development Environment
+
+### Operating System
+
+WSL2 Ubuntu.
+
+### AWS Region
+
+```bash
+export AWS_REGION="us-east-1"
+export AWS_DEFAULT_REGION="$AWS_REGION"
+export AWS_PAGER=""
+```
+
+### Required Tools
+
+| Tool | Purpose |
+|---|---|
+| AWS CLI v2 | AWS resource management |
+| Linux Bash | CLI workflows and scripts |
+| jq | JSON processing |
+| Python 3 | Optional consumer simulations |
+| Boto3 | Python AWS SDK |
+| AWS Lambda | Event-driven message consumers |
+| CloudWatch | Metrics and logs |
+| IAM | Access management |
+| Git | Version control |
+| GitHub | Lab documentation |
+
+### Verify Tools
+
+```bash
+aws --version
+python3 --version
+jq --version
+git --version
+aws sts get-caller-identity
+```
+
+---
+
+## 18. CloudWatch Monitoring
+
+Important SQS CloudWatch metrics include:
+
+| Metric | Purpose |
+|---|---|
+| ApproximateNumberOfMessagesVisible | Available messages |
+| ApproximateNumberOfMessagesNotVisible | In-flight messages |
+| ApproximateAgeOfOldestMessage | Approximate age of oldest unprocessed message |
+| NumberOfMessagesSent | Messages sent |
+| NumberOfMessagesReceived | Message receives |
+| NumberOfMessagesDeleted | Message deletion operations |
+| NumberOfEmptyReceives | Receives that return no messages |
+
+### Production Monitoring Goals
+
+- Detect growing backlogs.
+- Identify delayed consumers.
+- Investigate repeated receives.
+- Monitor failed processing.
+- Detect unexpectedly old messages.
+- Identify dead-letter queue activity.
+- Improve system reliability.
+
+SQS metrics are approximate and should be interpreted alongside application logs and consumer telemetry.
+
+---
+
+## 19. Cloud Security Engineering Considerations
+
+Amazon SQS is commonly used in security-sensitive distributed applications.
+
+Important security practices include:
+
+### IAM Least Privilege
+
+Grant producers permission to send messages and consumers permission to receive and delete messages only from the intended queues.
+
+### Queue Resource Policies
+
+Use appropriate queue policies to control resource access, especially for cross-account integrations.
+
+### Encryption
+
+Review SQS encryption at rest and encryption in transit.
+
+For customer-managed KMS keys, verify the required KMS permissions and key policy.
+
+### Sensitive Message Data
+
+Avoid placing unnecessary secrets, passwords, or sensitive customer information directly in message bodies.
+
+### Dead-Letter Queue Protection
+
+DLQs may contain failed messages with sensitive data.
+
+Apply appropriate IAM permissions, encryption, and retention settings.
+
+### Idempotency
+
+Use application-level idempotency to prevent duplicate financial, inventory, or order-processing operations.
+
+### Monitoring
+
+Investigate unexpected message volume, consumer failures, permission changes, and growing backlogs.
+
+### Security Principle
+
+Reliable message-processing systems require secure access, correct retry behavior, failure isolation, idempotency, and operational monitoring.
+
+---
+
+## 20. AWS Cost Management
+
+Amazon SQS is billed based on request usage and applicable service features.
+
+Additional costs may arise from:
+
+- Lambda invocations.
+- CloudWatch Logs.
+- CloudWatch alarms.
+- Customer-managed KMS key usage.
+- Excessive message retries.
+- High-frequency empty polling.
+
+### Cost-Safety Practices
+
+- Use small test messages.
+- Avoid uncontrolled producer loops.
+- Use bounded message receive attempts.
+- Use long polling when appropriate.
+- Delete temporary queues after experiments.
+- Avoid unnecessary Lambda invocations.
+- Monitor application retries.
+
+The labs use disposable resources and controlled workloads rather than production-scale load tests.
+
+---
+
+## 21. Repository Structure
+
+```text
+aws-sqs-troubleshooting-labs/
 │
 ├── README.md
 ├── .gitignore
 │
-├── 01-table-not-found/
+├── 01-queue-does-not-exist/
 │   └── README.md
 │
-├── 02-putitem-access-denied/
+├── 02-sendmessage-access-denied/
 │   └── README.md
 │
-├── 03-validation-exception/
+├── 03-messages-not-being-received/
 │   └── README.md
 │
-├── 04-wrong-partition-key/
+├── 04-visibility-timeout-misconfiguration/
 │   └── README.md
 │
-├── 05-provisioned-throughput-exceeded/
+├── 05-messages-processed-multiple-times/
 │   └── README.md
 │
-├── 06-conditional-check-failed/
+├── 06-dlq-not-receiving-messages/
 │   └── README.md
 │
-├── 07-gsi-query-not-returning-results/
+├── 07-fifo-message-deduplication/
 │   └── README.md
 │
-├── 08-dynamodb-streams-not-triggering/
+├── 08-lambda-sqs-event-source-failure/
 │   └── README.md
 │
-├── 09-point-in-time-recovery-investigation/
+├── 09-poison-message-investigation/
 │   └── README.md
 │
-└── 10-dynamodb-hot-partition/
+└── 10-queue-backlog-processing-delay/
     └── README.md
 ```
 
-Lab folders and their documentation will be added as each practical exercise is completed.
+This is the planned final structure. Individual lab files will be created after completing each hands-on exercise.
+
+### Lab Folder Contents
+
+Depending on the scenario, folders may contain:
+
+```text
+XX-lab-name/
+├── README.md
+├── scripts/
+├── policies/
+└── diagrams/
+```
+
+Source code, scripts, and reusable policies can be committed to GitHub after review.
+
+Do not commit credentials, secrets, unreviewed logs, or sensitive production data.
 
 ---
 
-## Troubleshooting Lab Roadmap
+## 22. Expected Skills After Completing All Labs
 
-| Lab | Troubleshooting Scenario | Main Investigation |
-|---|---|---|
-| 01 | Table Not Found | Incorrect table name, Region, or missing resource |
-| 02 | PutItem AccessDenied | IAM permissions and authorization |
-| 03 | ValidationException | Invalid item structure and attribute types |
-| 04 | Wrong Partition Key | Primary key schema and item retrieval |
-| 05 | Provisioned Throughput Exceeded | Capacity settings and request throttling |
-| 06 | ConditionalCheckFailedException | Conditional expressions and data conflicts |
-| 07 | GSI Query Not Returning Results | Index keys, query conditions, and index contents |
-| 08 | DynamoDB Streams Not Triggering | Stream configuration and Lambda triggers |
-| 09 | Point-in-Time Recovery Investigation | PITR configuration and restoration |
-| 10 | DynamoDB Hot Partition | Uneven partition-key access and performance |
+| Skill Category | Topics |
+|---|---|
+| Queue Operations | CreateQueue, GetQueueUrl, SendMessage, ReceiveMessage |
+| Message Lifecycle | Visibility timeout, in-flight messages, DeleteMessage |
+| Reliability | Retries, duplicate delivery, idempotency |
+| Failure Handling | DLQ, poison messages, redrive |
+| FIFO Queues | Ordering, grouping, deduplication |
+| Serverless | SQS–Lambda event source mapping |
+| IAM Security | Identity policies, queue policies, KMS |
+| Monitoring | CloudWatch metrics, backlog, message age |
+| Troubleshooting | AWS CLI diagnostics and root cause analysis |
+| Operations | Cleanup, cost management, production incident response |
 
----
+### Interview Preparation
 
-## Lab 01 — Table Not Found
+After these labs, an engineer should be able to explain:
 
-### Production Incident
-
-An application attempts to access a DynamoDB table that does not exist in the configured AWS account or Region.
-
-The request fails with:
-
-`ResourceNotFoundException`
-
-### Investigation Areas
-
-- DynamoDB table name.
-- AWS account and Region.
-- Existing table inventory.
-- Table status.
-- AWS CLI configuration.
-- Application environment variables.
-
-### Expected Outcome
-
-Identify the missing or incorrectly referenced table and restore successful access.
+1. Why messages may be missing from a consumer's results.
+2. How visibility timeouts affect retry behavior.
+3. Why standard SQS messages can be delivered multiple times.
+4. Why idempotency is necessary.
+5. How dead-letter queues isolate repeatedly failing messages.
+6. How FIFO deduplication works.
+7. How Lambda polls SQS queues.
+8. Why Lambda can repeatedly process failed message batches.
+9. How poison messages affect consumer performance.
+10. How to investigate and reduce queue-processing delays.
 
 ---
 
-## Lab 02 — PutItem AccessDenied
+## 23. Official AWS Documentation
 
-### Production Incident
-
-An application attempts to write an item to DynamoDB but receives:
-
-`AccessDeniedException`
-
-### Investigation Areas
-
-- IAM identity and permissions.
-- DynamoDB PutItem authorization.
-- Identity-based and resource-based policies where applicable.
-- Explicit denies.
-- Table ARN.
-- CloudTrail investigation.
-
-### Expected Outcome
-
-Identify the missing or denied permission and restore the authorized write operation using least privilege.
+- [Amazon SQS Developer Guide](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html)
+- [AWS CLI SQS Reference](https://docs.aws.amazon.com/cli/latest/reference/sqs/)
+- [Amazon SQS Visibility Timeout](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)
+- [Using Dead-Letter Queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html)
+- [Amazon SQS FIFO Queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-fifo-queues.html)
+- [Using Lambda with Amazon SQS](https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html)
+- [Lambda SQS Error Handling](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html)
+- [Monitoring Amazon SQS with CloudWatch](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-monitoring-using-cloudwatch.html)
+- [Amazon SQS Pricing](https://aws.amazon.com/sqs/pricing/)
 
 ---
 
-## Lab 03 — ValidationException
+## Conclusion
 
-### Production Incident
+This repository provides hands-on, production-style troubleshooting experience with Amazon SQS.
 
-An application attempts to write or retrieve data using a request that violates DynamoDB validation requirements.
+The labs progress from basic queue configuration and authorization errors to more advanced message-delivery, retry, dead-letter queue, FIFO, Lambda integration, and backlog scenarios.
 
-The operation fails with:
+The primary goal is not only to understand Amazon SQS concepts but also to develop the practical skills required to investigate messaging incidents, identify root causes, implement safe remediation, and verify recovery.
 
-`ValidationException`
-
-### Investigation Areas
-
-- Table key schema.
-- Attribute names and data types.
-- Missing required key attributes.
-- Invalid expression syntax.
-- Incorrect API request structure.
-
-### Expected Outcome
-
-Correct the invalid request and verify successful DynamoDB operations.
-
----
-
-## Lab 04 — Wrong Partition Key
-
-### Production Incident
-
-An application uses an incorrect partition-key value or key structure when retrieving an item.
-
-The requested item cannot be found, or DynamoDB rejects the malformed key.
-
-### Investigation Areas
-
-- Partition key.
-- Sort key.
-- Primary key schema.
-- GetItem requests.
-- Query operations.
-- Exact key values and attribute types.
-
-### Expected Outcome
-
-Identify the correct primary key and retrieve the intended item.
-
----
-
-## Lab 05 — Provisioned Throughput Exceeded
-
-### Production Incident
-
-An application experiences DynamoDB throttling when request demand exceeds available provisioned capacity or related service limits.
-
-Possible error:
-
-`ProvisionedThroughputExceededException`
-
-### Investigation Areas
-
-- Read Capacity Units (RCUs).
-- Write Capacity Units (WCUs).
-- Provisioned capacity.
-- Throttling metrics.
-- Consumed capacity.
-- Auto scaling.
-- Application retry behavior.
-
-### Expected Outcome
-
-Identify the throttling cause and restore reliable operations through appropriate capacity configuration or workload adjustments.
-
----
-
-## Lab 06 — ConditionalCheckFailedException
-
-### Production Incident
-
-An application attempts to update or write an item using a condition that evaluates to false.
-
-The operation fails with:
-
-`ConditionalCheckFailedException`
-
-### Investigation Areas
-
-- ConditionExpression.
-- Attribute existence checks.
-- Conditional PutItem operations.
-- Conditional UpdateItem operations.
-- Version attributes.
-- Optimistic concurrency control.
-
-### Expected Outcome
-
-Identify the failed condition and correct the write logic without accidentally overwriting valid data.
-
----
-
-## Lab 07 — GSI Query Not Returning Results
-
-### Production Incident
-
-An application queries a DynamoDB Global Secondary Index but does not receive the expected records.
-
-### Investigation Areas
-
-- GSI name and status.
-- Index partition key.
-- Index sort key.
-- KeyConditionExpression.
-- Missing indexed attributes.
-- Sparse indexes.
-- Index projection.
-- Eventual consistency.
-
-### Expected Outcome
-
-Identify why the items are not returned and correct the index query or data model.
-
----
-
-## Lab 08 — DynamoDB Streams Not Triggering
-
-### Production Incident
-
-An application expects AWS Lambda to process DynamoDB item changes, but the expected processing does not occur.
-
-### Investigation Areas
-
-- DynamoDB Streams configuration.
-- Stream ARN.
-- Stream view type.
-- Lambda event source mapping.
-- IAM permissions.
-- Lambda execution logs.
-- Event source mapping state.
-- Processing errors and retries.
-
-### Expected Outcome
-
-Restore the intended change-processing workflow and verify that new DynamoDB changes trigger Lambda.
-
----
-
-## Lab 09 — Point-in-Time Recovery Investigation
-
-### Production Incident
-
-A critical DynamoDB item is accidentally deleted or modified.
-
-The team must investigate the table's point-in-time recovery settings and determine whether recovery is possible.
-
-### Investigation Areas
-
-- PITR enablement.
-- Available recovery window.
-- Earliest and latest restorable times.
-- RestoreTableToPointInTime.
-- Restoring into a new table.
-- Data verification.
-- Recovery procedures.
-
-### Expected Outcome
-
-Restore the required data to a new table when recovery is available and verify the restored records before considering any production cutover.
-
----
-
-## Lab 10 — DynamoDB Hot Partition
-
-### Production Incident
-
-A DynamoDB workload experiences uneven traffic distribution because a small number of partition-key values receive a disproportionate share of read or write requests.
-
-### Investigation Areas
-
-- Partition-key access patterns.
-- Uneven request distribution.
-- DynamoDB throttling.
-- Consumed capacity.
-- CloudWatch metrics.
-- Contributor Insights where available.
-- Partition-key design.
-- Write sharding.
-- Workload distribution.
-
-### Expected Outcome
-
-Identify the concentrated traffic pattern and evaluate remediation techniques that improve workload distribution.
-
----
-
-## Standard Troubleshooting Methodology
-
-Each lab follows a consistent production-style workflow.
-
-### 1. Incident Scenario
-
-Describe the production issue, affected application, symptoms, and expected behavior.
-
-### 2. Architecture
-
-Document the broken and healthy system architecture.
-
-### 3. Environment Preparation
-
-Configure AWS CLI, Linux Bash variables, AWS Region, and required tools.
-
-### 4. Resource Deployment
-
-Create the required AWS resources.
-
-### 5. Fault Injection
-
-Intentionally reproduce the target error in a safe lab environment.
-
-### 6. Investigation
-
-Use AWS CLI, CloudWatch, logs, metrics, and resource configurations to identify the problem.
-
-### 7. Root Cause Analysis
-
-Explain why the failure occurred and identify the configuration or application behavior responsible.
-
-### 8. Remediation
-
-Apply the smallest appropriate change to restore the service.
-
-### 9. Recovery Verification
-
-Confirm the operation succeeds and collect supporting evidence.
-
-### 10. Cleanup
-
-Remove temporary AWS resources to avoid unnecessary costs.
-
----
-
-## Security Best Practices
-
-This repository emphasizes Cloud Security Engineering throughout the labs.
-
-Important principles include:
-
-- Use IAM least privilege.
-- Avoid unrestricted DynamoDB permissions.
-- Verify AWS account and Region before changing resources.
-- Use appropriate encryption settings.
-- Protect sensitive data.
-- Avoid committing credentials or secrets.
-- Review resource-based access policies where applicable.
-- Use CloudTrail for audit investigations.
-- Enable appropriate monitoring.
-- Protect production data from accidental deletion.
-- Understand backup and recovery limitations.
-- Verify resources before cleanup.
-
-**All experiments should use temporary tables and fabricated data, never production customer records.**
-
----
-
-## Cost Management
-
-DynamoDB costs depend on capacity mode, data storage, requests, and optional features.
-
-Potential charges include:
-
-- DynamoDB read and write capacity.
-- On-demand requests.
-- Table and index storage.
-- DynamoDB Streams consumption.
-- Point-in-time recovery.
-- Backups and restores.
-- Lambda invocations.
-- CloudWatch monitoring.
-
-Labs should use small data sets and bounded test workloads.
-
-Avoid uncontrolled request loops, large tables, unnecessary long-lived resources, or unnecessary backup retention.
-
-Delete temporary resources once each lab is complete.
-
----
-
-## Skills Demonstrated
-
-By working through this repository, the following skills are practiced:
-
-- Amazon DynamoDB operations.
-- DynamoDB schema troubleshooting.
-- NoSQL data modeling.
-- IAM permission investigation.
-- Read and write capacity management.
-- CloudWatch monitoring.
-- Database performance troubleshooting.
-- DynamoDB query investigation.
-- Conditional expressions.
-- Global Secondary Indexes.
-- DynamoDB Streams.
-- Lambda integration.
-- Point-in-time recovery.
-- Incident response.
-- Root cause analysis.
-- Production remediation.
-- Cloud Security Engineering.
-- AWS CLI automation.
-- Linux troubleshooting.
-- AWS cost management.
-
----
-
-## Interview Preparation
-
-These labs help prepare for technical interviews involving:
-
-- Junior Cloud Engineer.
-- Cloud Operations Engineer.
-- Cloud Security Engineer.
-- DevOps Engineer.
-- Platform Engineer.
-- Infrastructure Engineer.
-- AWS Cloud Engineer.
-
-Example questions:
-
-**Why does DynamoDB return ResourceNotFoundException?**
-
-The specified table or index may not exist in the account and Region being used, or the referenced resource may not be in the expected state.
-
-**How do you troubleshoot DynamoDB AccessDeniedException?**
-
-Identify the caller, inspect relevant IAM and resource policies, check explicit denies, and verify that the required DynamoDB action is authorized for the intended resource.
-
-**What causes DynamoDB throttling?**
-
-Request traffic may exceed available capacity or applicable table, index, or partition-level limits.
-
-**What is the difference between a partition key and a sort key?**
-
-The partition key is used to determine data distribution. An optional sort key allows multiple items with the same partition-key value to be ordered and queried within that item collection.
-
-**What is a DynamoDB Global Secondary Index?**
-
-A GSI provides an alternative key schema for querying data.
-
-**What is DynamoDB point-in-time recovery?**
-
-PITR allows a table to be restored to a selected point within its available recovery window.
-
----
-
-## Documentation Standards
-
-Each completed lab includes a detailed `README.md` covering:
-
-- Overview.
-- Lab information.
-- Production incident scenario.
-- AWS architecture.
-- Relevant AWS concepts.
-- Prerequisites and safety.
-- AWS CLI deployment.
-- Fault injection.
-- Investigation.
-- CloudWatch evidence.
-- Root cause analysis.
-- Remediation.
-- Recovery verification.
-- Security considerations.
-- Cost management.
-- Resource cleanup.
-- Interview questions.
-- Lessons learned.
-- Official AWS documentation.
-
-The repository prioritizes practical investigation, clear explanations, secure remediation, and reproducible AWS CLI commands.
-
----
-
-## Official AWS Documentation
-
-- [Amazon DynamoDB Developer Guide](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html)
-- [DynamoDB API Reference](https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/Welcome.html)
-- [DynamoDB AWS CLI Reference](https://docs.aws.amazon.com/cli/latest/reference/dynamodb/)
-- [DynamoDB Security](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/security.html)
-- [DynamoDB Capacity Modes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html)
-- [DynamoDB Global Secondary Indexes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html)
-- [DynamoDB Streams](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html)
-- [DynamoDB Point-in-Time Recovery](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/PointInTimeRecovery.html)
-- [DynamoDB CloudWatch Metrics](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/metrics-dimensions.html)
-- [Amazon DynamoDB Pricing](https://aws.amazon.com/dynamodb/pricing/)
-
----
-
-**Repository Focus:** Building practical AWS troubleshooting, incident investigation, performance analysis, recovery, and cloud security skills through 10 production-style Amazon DynamoDB labs.
+The repository supports preparation for Cloud Engineering, Cloud Operations, DevOps, and Cloud Security Engineering roles.
